@@ -1,5 +1,6 @@
 const dns = require('dns');
-dns.setServers(['8.8.8.8', '8.8.4.4']); // Use Google DNS to fix ECONNREFUSED querySrv
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -10,68 +11,80 @@ const User = require('./models/User');
 
 const app = express();
 const server = http.createServer(app);
+
+// Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: "*", // Adjust in production
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
-// Database Connection
+
+// ======================
+// DATABASE CONNECTION
+// ======================
 const dbUrl = process.env.DATABASE_URL;
-console.log('Attempting to connect to MongoDB...');
-console.log('URL:', dbUrl?.replace(/:([^@]+)@/, ':****@'));
+
+console.log('Attempting MongoDB connection...');
+console.log('DB:', dbUrl ? 'Loaded ✔' : 'Missing ❌');
 
 mongoose.connect(dbUrl, {
-  serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+  serverSelectionTimeoutMS: 5000,
 })
   .then(() => console.log('✅ Connected to MongoDB Atlas'))
   .catch((err) => {
-    console.error('❌ MongoDB connection error:', err.message);
-    if (err.message.includes('querySrv ESERVFAIL') || err.message.includes('querySrv ECONNREFUSED')) {
-      console.error('👉 Suggestion: Your network is blocking MongoDB SRV records. Try using the long-form connection string instead of mongodb+srv://');
-    }
+    console.error('❌ MongoDB error:', err.message);
   });
 
 mongoose.connection.on('error', err => {
-  console.error('Mongoose connection error event:', err);
+  console.error('Mongoose error:', err);
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.log('Mongoose disconnected');
+  console.log('MongoDB disconnected');
 });
 
-// Middlewares
+
+// ======================
+// MIDDLEWARES
+// ======================
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
 app.use((req, res, next) => {
   req.io = io;
   next();
 });
 
-// Routes
+
+// ======================
+// ROUTES
+// ======================
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/chat', require('./routes/chatRoutes'));
 
 app.get('/', (req, res) => {
-  res.send('PrivateChat API is running');
+  res.send('PrivateChat API is running 🚀');
 });
 
-// Socket.io Logic
+
+// ======================
+// SOCKET.IO LOGIC
+// ======================
 io.on('connection', (socket) => {
   let currentUserId = null;
 
   socket.on('join', async (userId) => {
     currentUserId = userId;
     socket.join(`user_${userId}`);
-    
-    // Update status to online
+
     try {
       await User.findByIdAndUpdate(userId, { status: 'online' });
       io.emit('user_status', { userId, status: 'online' });
     } catch (err) {
-      console.error('Status update error:', err);
+      console.error('Join status error:', err);
     }
   });
 
@@ -79,21 +92,33 @@ io.on('connection', (socket) => {
     if (currentUserId) {
       try {
         const lastSeen = new Date();
-        await User.findByIdAndUpdate(currentUserId, { 
+
+        await User.findByIdAndUpdate(currentUserId, {
           status: 'offline',
           lastSeen
         });
-        io.emit('user_status', { userId: currentUserId, status: 'offline', lastSeen });
+
+        io.emit('user_status', {
+          userId: currentUserId,
+          status: 'offline',
+          lastSeen
+        });
       } catch (err) {
-        console.error('Status disconnect error:', err);
+        console.error('Disconnect error:', err);
       }
     }
+
     console.log('User disconnected:', socket.id);
   });
 
-  // Calling Signaling
+  // Calling system
   socket.on('call-user', ({ to, offer, fromName, type }) => {
-    io.to(`user_${to}`).emit('incoming-call', { from: currentUserId, fromName, offer, type });
+    io.to(`user_${to}`).emit('incoming-call', {
+      from: currentUserId,
+      fromName,
+      offer,
+      type
+    });
   });
 
   socket.on('answer-call', ({ to, answer }) => {
@@ -109,11 +134,14 @@ io.on('connection', (socket) => {
   });
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}
+
+// ======================
+// START SERVER (FIXED)
+// ======================
+const PORT = process.env.PORT || 5000;
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
 
 module.exports = app;
