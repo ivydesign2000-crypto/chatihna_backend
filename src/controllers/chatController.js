@@ -1,6 +1,7 @@
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const cloudinary = require('../config/cloudinary');
 
 const getChats = async (req, res) => {
   try {
@@ -58,6 +59,8 @@ const getMessages = async (req, res) => {
       senderId: msg.senderId._id,
       sender: msg.senderId,
       content: msg.content,
+      type: msg.type || 'text',
+      audioUrl: msg.audioUrl,
       isSeen: msg.isSeen,
       createdAt: msg.createdAt
     }));
@@ -70,11 +73,15 @@ const getMessages = async (req, res) => {
 
 const sendMessage = async (req, res) => {
   try {
-    const { receiverId, content } = req.body;
+    const { receiverId, content, audio } = req.body;
     const senderId = req.userId;
 
-    if (!receiverId || !content) {
-      return res.status(400).json({ message: "Receiver and content required" });
+    if (!receiverId) {
+      return res.status(400).json({ message: "Receiver required" });
+    }
+    
+    if (!content && !audio) {
+      return res.status(400).json({ message: "Content or audio required" });
     }
 
     // Find or create chat
@@ -94,10 +101,24 @@ const sendMessage = async (req, res) => {
       });
     }
 
+    let audioUrl = null;
+    let type = 'text';
+
+    if (audio) {
+      const uploadResponse = await cloudinary.uploader.upload(audio, {
+        resource_type: "video", // Cloudinary treats audio as video
+        folder: "chat_audio",
+      });
+      audioUrl = uploadResponse.secure_url;
+      type = 'audio';
+    }
+
     const message = await Message.create({
       chatId: chat._id,
       senderId,
-      content
+      content,
+      type,
+      audioUrl
     });
 
     // Populate sender for frontend
@@ -110,6 +131,8 @@ const sendMessage = async (req, res) => {
       senderId: populatedMessage.senderId._id,
       sender: populatedMessage.senderId,
       content: populatedMessage.content,
+      type: populatedMessage.type || 'text',
+      audioUrl: populatedMessage.audioUrl,
       isSeen: populatedMessage.isSeen,
       createdAt: populatedMessage.createdAt
     };
